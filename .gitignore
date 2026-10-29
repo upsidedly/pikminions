@@ -1,0 +1,15 @@
+.build/
+dist/
+.DS_Store
+.swiftpm/
+__pycache__/
+*.pyc
+.env
+.env.*
+*.log
+
+# Keep local task history and design investigation captures off GitHub.
+PLAN.md
+PROGRESS.md
+VERIFICATION.md
+docs/design-audit-*/

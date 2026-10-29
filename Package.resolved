@@ -1,0 +1,15 @@
+{
+  "originHash" : "84d613af96aaee7059958f126e858d3ec788440fa5d42ca03b8c504b8bc0c650",
+  "pins" : [
+    {
+      "identity" : "antille",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/Upsidedly/antille.git",
+      "state" : {
+        "revision" : "f51b1a9abced4aa26c3e67cc3c66df77186ba23b",
+        "version" : "1.0.0"
+      }
+    }
+  ],
+  "version" : 3
+}
