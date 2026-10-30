@@ -52,6 +52,65 @@ import SwiftUI
             desktop.close();exit(0)
         } catch {FileHandle.standardError.write(Data(("FAIL: "+error.localizedDescription+"\n").utf8));desktop.close();exit(1)}
     }
+    func checkSpawning() {
+        desktop.close()
+        let squad=SquadModel(),controller=DesktopSquadController(model:squad)
+        squad.mode = .desktop;squad.hidden=[];squad.docked=[];squad.pinned=[];squad.maxHeads=24;squad.headSizes=[:]
+        let prefix="spawn-check-"+UUID().uuidString
+        let ids=(0..<13).map{prefix+String($0)}
+        func run() throws {
+            defer {controller.close();for id in ids {UserDefaults.standard.removeObject(forKey:"Pikminions.position."+id)}}
+            for screen in [CGRect(x:0,y:40,width:1400,height:800),CGRect(x:-1440,y:-600,width:1440,height:800)] {
+                var occupied:[CGRect]=[]
+                for index in 0..<24 {
+                    let frame=DesktopHeadPlacement.frame(size:PikminSize.allCases[index%4].panelSize,screen:screen,occupied:occupied)
+                    guard screen.contains(frame),occupied.allSatisfy({!frame.intersects($0.insetBy(dx:-11.99,dy:-11.99))}) else {throw SourceFailure.message("Mixed-size stack overlaps or leaves a screen with a negative origin")}
+                    occupied.append(frame)
+                }
+                let invalid=DesktopHeadPlacement.frame(size:PikminSize.medium.panelSize,preferred:CGPoint(x:Double.nan,y:Double.infinity),screen:screen,occupied:[])
+                guard screen.contains(invalid) else {throw SourceFailure.message("Invalid saved coordinates did not recover")}
+            }
+            let short=CGRect(x:0,y:0,width:350,height:210),size=PikminSize.medium.panelSize
+            let first=DesktopHeadPlacement.frame(size:size,screen:short,occupied:[])
+            let wrapped=DesktopHeadPlacement.frame(size:size,screen:short,occupied:[first])
+            guard wrapped.maxX+12<=first.minX,wrapped.minY==first.minY else {throw SourceFailure.message("A full vertical stack did not wrap into a left column")}
+            var previous:[String:CGRect]=[:]
+            for index in 0..<12 {
+                let id=ids[index]
+                let agent=AgentRecord(id:id,source:"Fixture",threadID:id,runID:id,title:"Spawn sample \(index)",project:"Fixture",model:"Sample",state:.working,detail:"",updated:.now,openURL:nil)
+                squad.headSizes[id]=(index<2 ? PikminSize.medium:PikminSize.allCases[index%4]).rawValue
+                if index==2,let first=previous[ids[0]] {UserDefaults.standard.set([first.minX,first.minY],forKey:"Pikminions.position."+id)}
+                let placed=NSScreen.main.map{CGPoint(x:$0.visibleFrame.minX+20,y:$0.visibleFrame.minY+30)}
+                if index==3,let placed {UserDefaults.standard.set([placed.x,placed.y],forKey:"Pikminions.position."+id)}
+                squad.records.insert(agent,at:0);controller.sync()
+                if index==3,let placed,controller.frame(for:id)?.origin != placed {throw SourceFailure.message("A free saved position was changed")}
+                for record in squad.records {
+                    guard let frame=controller.frame(for:record.id),NSScreen.screens.contains(where:{$0.visibleFrame.contains(frame)}) else {throw SourceFailure.message("Spawned head leaves the visible screen")}
+                    if let old=previous[record.id],old != frame {throw SourceFailure.message("Spawning moved an existing head")}
+                    for other in squad.records where other.id != record.id {
+                        if let occupied=controller.frame(for:other.id),frame.intersects(occupied) {throw SourceFailure.message("Spawned heads overlap after insertion \(index+1)")}
+                    }
+                    previous[record.id]=frame
+                }
+                if index==1,let first=previous[ids[0]],let second=previous[id] {
+                    guard second.minX==first.minX,second.minY>=first.maxY+12 else {throw SourceFailure.message("New heads do not stack above an occupied spawn point")}
+                }
+            }
+            squad.records.reverse();controller.sync()
+            for (id,frame) in previous where controller.frame(for:id) != frame {throw SourceFailure.message("Roster reordering moved an existing head")}
+            squad.records.removeAll{$0.id==ids[0]};controller.sync()
+            let id=ids[12]
+            squad.records.insert(AgentRecord(id:id,source:"Fixture",threadID:id,runID:id,title:"Reused slot",project:"Fixture",model:"Sample",state:.working,detail:"",updated:.now,openURL:nil),at:0)
+            controller.sync()
+            guard controller.frame(for:id)==previous[ids[0]] else {throw SourceFailure.message("A retired head's free spawn slot was not reused")}
+            let saved=Dictionary(uniqueKeysWithValues:squad.records.compactMap{agent in controller.frame(for:agent.id).map{(agent.id,$0)}})
+            controller.close()
+            let restored=DesktopSquadController(model:squad);defer{restored.close()};restored.sync()
+            for (id,frame) in saved where restored.frame(for:id) != frame {throw SourceFailure.message("Saved stack did not survive panel recreation")}
+        }
+        do {try run();print("PASS: sequential native spawns stack without overlap, retain moved/saved mixed-size panels, reuse freed slots and restore positions.");exit(0)}
+        catch {FileHandle.standardError.write(Data(("FAIL: "+error.localizedDescription+"\n").utf8));exit(1)}
+    }
     private func after(_ delay:Double,_ action:@escaping @MainActor ()->Void) {
         let timer=Timer(timeInterval:delay,repeats:false) {_ in MainActor.assumeIsolated {action()}}
         menuTimers.append(timer)
@@ -149,6 +208,7 @@ import SwiftUI
                 .task {
                     samples.desktop.sync()
                     if CommandLine.arguments.contains("--check") {await samples.check()}
+                    if CommandLine.arguments.contains("--spawn-check") {samples.checkSpawning()}
                     if CommandLine.arguments.contains("--menu-check") {samples.checkMenu()}
                 }
                 .onDisappear {samples.desktop.close()}

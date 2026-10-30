@@ -12,6 +12,7 @@ import subprocess
 parser=argparse.ArgumentParser()
 parser.add_argument("--check",action="store_true")
 parser.add_argument("--menu-check",action="store_true")
+parser.add_argument("--spawn-check",action="store_true")
 args=parser.parse_args()
 root=Path(__file__).resolve().parents[1]
 subprocess.run(["swift","build"],cwd=root,check=True)
@@ -31,4 +32,5 @@ with (bundle/"Contents/Info.plist").open("wb") as output:plistlib.dump(info,outp
 subprocess.run(["codesign","--force","--sign","-",str(bundle)],check=True)
 if args.check:subprocess.run([str(executable),"--check"],check=True,timeout=15)
 if args.menu_check:subprocess.run([str(executable),"--menu-check"],check=True,timeout=15)
+if args.spawn_check:subprocess.run([str(executable),"--spawn-check"],check=True,timeout=15)
 print(bundle)

@@ -108,21 +108,29 @@ private final class HeadPanel:NSPanel {
             panels.removeValue(forKey:id)?.close()
         }
         let frame=NSScreen.main?.visibleFrame ?? CGRect(x:0,y:0,width:1440,height:900)
-        let cellWidth=(agents.map{model.size(for:$0).panelSize.width}.max() ?? 86)+12
-        let cellHeight=(agents.map{model.size(for:$0).panelSize.height}.max() ?? 116)+12
-        let columns=max(1,min(8,Int((frame.width-24)/cellWidth)))
-        for (index,agent) in agents.enumerated() {
-            let selectedSize=model.size(for:agent),size=selectedSize.panelSize
+        // Finish existing resizes before reserving space for any new panels.
+        for agent in agents {
             if let panel=panels[agent.id] {
+                let selectedSize=model.size(for:agent)
                 panel.title=model.displayName(agent)+" · Desktop Pikmin"
-                if panel.frame.size != size {resize(agent.id,panel:panel,to:selectedSize)}
-                continue
+                if panel.frame.size != selectedSize.panelSize {resize(agent.id,panel:panel,to:selectedSize)}
             }
+        }
+        let pending=agents.filter{panels[$0.id]==nil}.map {agent -> (agent:AgentRecord,preferred:CGPoint?) in
             let saved=UserDefaults.standard.array(forKey:"Pikminions.position."+agent.id) as? [Double]
-            let x=saved?.first ?? (frame.maxX-19-size.width-Double(index%columns)*cellWidth)
-            let y=(saved?.count==2 ? saved?[1]:nil) ?? (frame.minY+30+Double(index/columns)*cellHeight)
-            let origin=CGPoint(x:min(frame.maxX-size.width,max(frame.minX,x)),y:min(frame.maxY-size.height,max(frame.minY,y)))
-            let panel=HeadPanel(contentRect:CGRect(origin:origin,size:size),styleMask:[.borderless,.nonactivatingPanel],backing:.buffered,defer:false)
+            let preferred=saved.flatMap {values -> CGPoint? in
+                guard values.count==2,values.allSatisfy(\.isFinite) else{return nil}
+                return CGPoint(x:values[0],y:values[1])
+            }
+            return (agent,preferred)
+        }
+        // Restore saved locations first so a newly observed agent cannot claim
+        // a returning head's position before its panel has been recreated.
+        for item in pending.filter({$0.preferred != nil})+pending.filter({$0.preferred==nil}) {
+            let agent=item.agent,size=model.size(for:agent).panelSize
+            let screen=item.preferred.flatMap {point in NSScreen.screens.first{$0.visibleFrame.contains(point)}?.visibleFrame} ?? frame
+            let placement=DesktopHeadPlacement.frame(size:size,preferred:item.preferred,screen:screen,occupied:panels.values.map(\.frame))
+            let panel=HeadPanel(contentRect:placement,styleMask:[.borderless,.nonactivatingPanel],backing:.buffered,defer:false)
             panel.backgroundColor = .clear;panel.isOpaque=false;panel.hasShadow=false;panel.isFloatingPanel=true
             panel.animationBehavior = .none
             panel.title=model.displayName(agent)+" · Desktop Pikmin"
@@ -131,6 +139,7 @@ private final class HeadPanel:NSPanel {
             let hosting=NSHostingView(rootView:DesktopHead(model:model,id:agent.id))
             hosting.sizingOptions=[];hosting.frame=CGRect(origin:.zero,size:size);hosting.autoresizingMask=[.width,.height]
             let container=NSView(frame:hosting.frame);container.addSubview(hosting);panel.contentView=container
+            UserDefaults.standard.set([placement.minX,placement.minY],forKey:"Pikminions.position."+agent.id)
             panels[agent.id]=panel;panel.orderFrontRegardless()
         }
     }
