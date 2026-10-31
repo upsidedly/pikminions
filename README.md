@@ -15,7 +15,9 @@ Pikminions gives T3 Code conversations recognizable Pikmin heads. Grab one, let 
 
 ## Install
 
-Download the Apple Silicon preview from [Releases](https://github.com/Upsidedly/pikminions/releases) and move `Pikminions.app` to `/Applications`. Preview bundles are locally signed development builds, not Developer ID signed or notarized. Building from source is described below.
+Download the latest [release](https://github.com/upsidedly/pikminions/releases/latest), open the `.dmg`, and drag **Pikminions** into **Applications**. These builds are for Apple silicon Macs. Quit an older Pikminions before replacing it.
+
+The app is locally signed and is not notarized. macOS may require first-launch approval in **System Settings → Privacy & Security**.
 
 ## Use
 

@@ -30,11 +30,19 @@ subprocess.run(["iconutil","-c","icns",str(iconset),"-o",str(resources/"AppIcon.
 docs_assets=root/"docs/assets";docs_assets.mkdir(parents=True,exist_ok=True)
 shutil.copy2(art/"icon-1024.png",docs_assets/"pikminions-icon.png")
 shutil.copy2(art/"pikmin-heads.png",docs_assets/"pikmin-heads.png")
-info={"CFBundleIdentifier":"dev.upsided.pikminions","CFBundleName":"Pikminions","CFBundleDisplayName":"Pikminions","CFBundleExecutable":"Pikminions","CFBundleIconFile":"AppIcon","CFBundlePackageType":"APPL","CFBundleShortVersionString":"1.0.0","CFBundleVersion":"1","LSMinimumSystemVersion":"14.0","LSUIElement":True,"NSHighResolutionCapable":True}
+info={"CFBundleIdentifier":"dev.upsided.pikminions","CFBundleName":"Pikminions","CFBundleDisplayName":"Pikminions","CFBundleExecutable":"Pikminions","CFBundleIconFile":"AppIcon","CFBundlePackageType":"APPL","CFBundleShortVersionString":"1.0.1","CFBundleVersion":"2","LSMinimumSystemVersion":"14.0","LSUIElement":True,"NSHighResolutionCapable":True}
 if args.fixture:
     info["CFBundleIdentifier"]+=".fixture"
     info["CFBundleName"]="Pikminions Fixture"
     info["CFBundleDisplayName"]="Pikminions Fixture"
+for notice in ("LICENSE", "NOTICE", "PROVENANCE.md"):
+    shutil.copy2(root/notice, resources/notice)
+antille_checkout = root/".build/checkouts/antille"
+for notice in ("LICENSE", "NOTICE"):
+    source = antille_checkout/notice
+    if source.is_file():
+        target = resources/"AntilleNotices"; target.mkdir(exist_ok=True)
+        shutil.copy2(source, target/notice)
 with (bundle/"Contents/Info.plist").open("wb") as f: plistlib.dump(info,f)
 subprocess.run(["codesign","--force","--sign","-",str(bundle)],check=True)
 print(bundle)

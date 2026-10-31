@@ -35,7 +35,7 @@ final class LocalProcessJob:@unchecked Sendable {
                     Thread.detachNewThread { [self] in drain(stdout.fileHandleForReading,isOutput:true) }
                     Thread.detachNewThread { [self] in drain(stderr.fileHandleForReading,isOutput:false) }
                     if rpc {
-                        try write(["id":1,"method":"initialize","params":["clientInfo":["name":"pikminions","version":"1.0.0"]]])
+                        try write(["id":1,"method":"initialize","params":["clientInfo":["name":"pikminions","version":"1.0.1"]]])
                     } else { try? stdin.fileHandleForWriting.close() }
                     timeout=Task { [weak self] in
                         do {try await Task.sleep(for:.seconds(20))} catch {return}
