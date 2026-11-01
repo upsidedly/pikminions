@@ -14,6 +14,16 @@ import AppKit
         for (key,value) in extra {payload[key]=value}
         return try JSONDecoder().decode(T3Shell.Thread.self,from:JSONSerialization.data(withJSONObject:payload))
     }
+    let conversationLink=T3ConversationLink.desktopURL(environmentID:"environment-one",threadID:"thread-one")
+    try expect(conversationLink?.absoluteString=="t3code://threads/environment-one/thread-one","conversation links use T3's desktop protocol and preserve environment/thread identity")
+    try expect(T3ConversationLink.desktopURL(environmentID:"environment-two",threadID:"thread-one") != conversationLink,"identical thread IDs in different environments have different desktop destinations")
+    let forkLink=conversationLink?.deletingLastPathComponent().appending(path:"fork-two")
+    try expect(forkLink==T3ConversationLink.desktopURL(environmentID:"environment-one",threadID:"fork-two"),"fresh and forked conversations retain their environment and target the new thread")
+    let escapedLink=T3ConversationLink.desktopURL(environmentID:"environment%one",threadID:"thread?prompt=wrong#fragment")
+    try expect(escapedLink?.path=="/environment%one/thread?prompt=wrong#fragment" && escapedLink?.query==nil && escapedLink?.fragment==nil,"identifiers cannot inject a prompt query or URL fragment")
+    for invalid in ["",".","..","other/thread","other\\thread"," thread","thread\n"] {
+        try expect(T3ConversationLink.desktopURL(environmentID:invalid,threadID:"thread")==nil && T3ConversationLink.desktopURL(environmentID:"environment",threadID:invalid)==nil,"incomplete or ambiguous identities do not produce a conversation link")
+    }
     try expect(mappedT3State(try thread("waiting")) == .working,"generic waiting is not an approval")
     try expect(mappedT3State(try thread("running",["pendingRuntimeRequest":["id":"request","kind":"user_input","blocking":false]])) == .working,"nonblocking input")
     try expect(mappedT3State(try thread("running",["pendingRuntimeRequest":["id":"request","kind":"user_input"]])) == .waitingInput,"blocking input")

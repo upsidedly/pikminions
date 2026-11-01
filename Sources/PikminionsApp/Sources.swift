@@ -173,7 +173,7 @@ actor AgentSources {
         let aliases=SQLiteMetadata.codexAliases()
         return shell.threads.filter{$0.archivedAt==nil && $0.deletedAt==nil}.map { thread in
             let state=mappedT3State(thread)
-            let url=origin.appending(path:environment.environmentId).appending(path:thread.id)
+            let url=T3ConversationLink.desktopURL(environmentID:environment.environmentId,threadID:thread.id)
             let held=thread.status=="completed" && state == .working
             var record=AgentRecord(id:"t3:"+thread.id,nativeID:thread.activeProviderThreadId.flatMap{aliases[$0]},
                 source:"T3",threadID:thread.id,runID:thread.latestRunId ?? thread.activeRunId ?? "",title:thread.title,

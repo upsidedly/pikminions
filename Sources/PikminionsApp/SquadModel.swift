@@ -516,11 +516,11 @@ enum SquadMode:String,CaseIterable {case desktop="Desktop",island="Island",both=
     func revealAll() {hidden=[];preferencesChanged()}
     func open(_ agent:AgentRecord) {
         if AppRuntime.fixture {showConversation(agent);return}
-        if let url=agent.openURL {NSWorkspace.shared.open(url)}
-        else {
-            selectedID=agent.id;showWindow?()
-            error="Codex does not expose a verified direct conversation link here. Open this conversation in Codex using its title."
-        }
+        if let url=agent.openURL,NSWorkspace.shared.open(url) {return}
+        selectedID=agent.id;showWindow?()
+        error=agent.source=="T3"
+            ? "Couldn't open this conversation in T3. Make sure the T3 desktop app is installed, then try again."
+            : "Codex does not expose a verified direct conversation link here. Open this conversation in Codex using its title."
     }
     func select(_ agent:AgentRecord) {selectedID=agent.id;showWindow?()}
     func pairHost() {
