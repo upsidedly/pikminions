@@ -10,7 +10,7 @@ import Antille
     private var inFlight:[String:Task<[String],Error>]=[:]
     private let directory=URL.applicationSupportDirectory.appending(path:AppRuntime.fixture ? "PikminionsFixture/sprites":"Pikminions/sprites")
     func cancel() {for task in inFlight.values {task.cancel()};inFlight=[:]}
-    private func key(_ species:PikminSpecies,_ mood:PikminMood,_ growth:PikminGrowth,_ idle:PikminIdleKind?=nil,_ appearance:PikminLook?=nil)->String {"\(species.rawValue)-\(mood.rawValue)-\(growth.rawValue)-v7"+(appearance.map{"-look-"+$0.assetKey} ?? "")+(idle.map{"-idle-"+$0.rawValue} ?? "")}
+    private func key(_ species:PikminSpecies,_ mood:PikminMood,_ growth:PikminGrowth,_ idle:PikminIdleKind?=nil,_ appearance:PikminLook?=nil)->String {"\(species.rawValue)-\(mood.rawValue)-\(growth.rawValue)-"+(mood == .working ? "v8-work":"v7")+(appearance.map{"-look-"+$0.assetKey} ?? "")+(idle.map{"-idle-"+$0.rawValue} ?? "")}
     func cachedFrames(species:PikminSpecies,mood:PikminMood,growth:PikminGrowth,idle:PikminIdleKind?=nil,appearance:PikminLook?=nil)->[String]? {cache[key(species,mood,growth,idle,appearance)]}
     func poster(species:PikminSpecies,mood:PikminMood,growth:PikminGrowth,gaze:PikminGaze = .zero,appearance:PikminLook?=nil) async throws -> String {
         let pose=gaze == .zero ? "":"-gaze-\(Int(gaze.x))-\(Int(gaze.y))"

@@ -11,7 +11,9 @@ import SwiftUI
     let model:SquadModel
     let desktop:DesktopSquadController
     let sampleIDs:[String]
+    var sleepMode:Bool {Bundle.main.bundleIdentifier?.contains(".sleep.fixture")==true || CommandLine.arguments.contains("--sleep-check")}
     var result="Right-click a sample head → Size."
+    var reduceMotion=false
     private var menuTimers:[Timer]=[]
     private var trackingMenu:NSMenu?
     private var highlightedTitle:String?
@@ -32,13 +34,23 @@ import SwiftUI
         self.model=model;desktop=DesktopSquadController(model:model);sampleIDs=model.records.map(\.id)
         model.desktop=desktop
         super.init()
+        if sleepMode {
+            if let screen=NSScreen.main?.visibleFrame {
+                UserDefaults.standard.set([screen.minX+20.25,screen.minY+30.625],forKey:"Pikminions.position.size-sample-medium")
+            }
+            model.records=model.records.map {agent in var result=agent;result.state = .finished;result.updated=Date.now.addingTimeInterval(-300);return result}
+            model.conversationCoordinator=ConversationCoordinator(model:model)
+            model.advanceDesktopSleep(at:Date.now.addingTimeInterval(-3))
+            result="Finished samples · click a head to wake it and open its conversation."
+        }
     }
     func validate() throws {
         for agent in model.records {
             let expected=model.size(for:agent).panelSize
+            let frame=desktop.frame(for:agent.id)
+            let window=NSApp.windows.first(where:{$0.title==model.displayName(agent)+" · Desktop Pikmin"})
             guard let frame=desktop.frame(for:agent.id),frame.size==expected,
-                  let window=NSApp.windows.first(where:{$0.title==model.displayName(agent)+" · Desktop Pikmin"}),
-                  window.contentView?.bounds.size==expected else {throw SourceFailure.message("Native panel does not match \(model.size(for:agent).title)")}
+                  let window,window.contentView?.bounds.size==expected else {throw SourceFailure.message("Native panel does not match \(model.size(for:agent).title): expected \(expected), panel \(String(describing:frame)), content \(String(describing:window?.contentView?.bounds)), visible \(model.visibleHeads.map(\.id))")}
         }
         result="Native panels match selected sizes."
     }
@@ -51,6 +63,50 @@ import SwiftUI
             print("PASS: real native desktop panels and content bounds follow all four sizes through forward/reverse resizing.")
             desktop.close();exit(0)
         } catch {FileHandle.standardError.write(Data(("FAIL: "+error.localizedDescription+"\n").utf8));desktop.close();exit(1)}
+    }
+    func checkSleep() async {
+        do {
+            try validate()
+            for id in sampleIDs {
+                guard let event=model.sleepEvents[id],event.isSleeping,event.pose(at:.now).sleepiness==1 else {throw SourceFailure.message("Completed native sample did not sleep")}
+            }
+            guard let clicked=model.records.first else {throw SourceFailure.message("Missing sample head")}
+            model.showConversation(clicked)
+            guard model.sleepEvents[clicked.id]?.kind == .wake,model.attending.contains(clicked.id),
+                  NSApp.windows.contains(where:{$0.title==model.displayName(clicked)+" · Pikminions" && $0.isVisible}) else {throw SourceFailure.message("Wake activation did not keep the same-click conversation behavior")}
+            try await Task.sleep(for:.milliseconds(1500))
+            model.advanceDesktopSleep()
+            guard model.sleepEvents[clicked.id]==nil,model.attending.contains(clicked.id) else {throw SourceFailure.message("A completed head slept again while its conversation was open")}
+            model.advanceDesktopSleep(at:Date.now.addingTimeInterval(121))
+            guard model.sleepEvents[clicked.id]?.isSleeping==true,model.attending.contains(clicked.id) else {throw SourceFailure.message("An untouched conversation prevented a later return to sleep")}
+            let workingID=sampleIDs[1],questionID=sampleIDs[2],dockedID=sampleIDs[3]
+            model.records=model.records.map {agent in
+                var result=agent
+                if agent.id==workingID {result.state = .working;result.runID="new-work"}
+                if agent.id==questionID {result.pendingRequestID="sample-question";result.pendingRequestKind="user_input"}
+                return result
+            }
+            desktop.sync()
+            guard model.sleepEvents[workingID]?.kind == .wake,model.sleepEvents[questionID]?.kind == .wake else {throw SourceFailure.message("Native head did not wake for work or input")}
+            model.docked.insert(dockedID);desktop.sync()
+            guard model.sleepEvents[dockedID]==nil,desktop.frame(for:dockedID)==nil else {throw SourceFailure.message("A docked head retained desktop sleep state")}
+            model.mode = .island;desktop.sync()
+            guard model.sleepEvents.isEmpty else {throw SourceFailure.message("Desktop sleep leaked into island mode")}
+            model.conversationCoordinator?.closeAll();desktop.close()
+            print("PASS: native Small/Medium/Large/XL desktop heads sleep; activation wakes and opens conversation once; untouched conversations can sleep again; work/input wake; docking/island clear sleep.")
+            exit(0)
+        } catch {FileHandle.standardError.write(Data(("FAIL: "+error.localizedDescription+"\n").utf8));model.conversationCoordinator?.closeAll();desktop.close();exit(1)}
+    }
+    func previewActivity(_ state:AgentState,age:TimeInterval=300) {
+        model.conversationCoordinator?.closeAll()
+        model.mode = .island;model.advanceDesktopSleep();model.mode = .desktop
+        model.records=model.records.map {agent in
+            var result=agent;result.state=state;result.updated=Date.now.addingTimeInterval(-age)
+            result.runID=state.rawValue;result.pendingRequestID=nil;result.pendingRequestKind=nil
+            return result
+        }
+        model.advanceDesktopSleep(at:age>200 ? Date.now.addingTimeInterval(-3):.now)
+        desktop.sync()
     }
     func checkSpawning() {
         desktop.close()
@@ -189,27 +245,46 @@ import SwiftUI
 @main struct HeadSizeFixture:App {
     @State private var samples=HeadSizeSamples()
     var body:some Scene {
-        Window("Pikminions Size Fixture",id:"sizes") {
+        Window(samples.sleepMode ? "Pikminions Sleep Fixture":"Pikminions Size Fixture",id:"sizes") {
             VStack(alignment:.leading,spacing:18) {
-                Text("Desktop head sizes").font(.headline)
+                Text(samples.sleepMode ? "Sleeping desktop Pikmin":"Desktop head sizes").font(.headline)
                 Text("Sample data only · no live connection or credentials").font(.caption).foregroundStyle(.secondary)
                 HStack(alignment:.top,spacing:18) {
                     ForEach(samples.sampleIDs,id:\.self) {id in
                         VStack {
-                            DesktopHead(model:samples.model,id:id)
+                            if samples.reduceMotion,let agent=samples.model.records.first(where:{$0.id==id}) {
+                                let size=samples.model.size(for:agent)
+                                PikminDrawing(species:samples.model.species(for:agent),mood:agent.mood,growth:samples.model.growth,time:0,rest:samples.model.sleepEvents[id]?.reducedMotionPose ?? .awake)
+                                    .frame(width:size.artSize.width,height:size.artSize.height)
+                                    .frame(width:size.panelSize.width,height:size.panelSize.height,alignment:.top)
+                            } else {DesktopHead(model:samples.model,id:id)}
                             Text(samples.model.records.first(where:{$0.id==id}).map{samples.model.size(for:$0).title} ?? "Removed sample").font(.caption)
                         }.frame(width:142,height:218,alignment:.top)
                     }
                 }
                 Text(samples.result).font(.caption)
+                if samples.sleepMode {
+                    HStack {
+                        Button("Sleeping") {samples.previewActivity(.finished)}
+                        Button("Nearly asleep") {samples.previewActivity(.finished,age:117)}
+                        Button("Working") {samples.previewActivity(.working)}
+                        Toggle("Static pose preview",isOn:$samples.reduceMotion)
+                    }.controlSize(.small)
+                    HStack(spacing:12) {
+                        ForEach(PikminSpecies.allCases) {species in
+                            PikminDrawing(species:species,mood:.happy,growth:.reference,time:0,rest:.asleep).frame(width:52,height:64)
+                        }
+                    }.accessibilityLabel("Static sleeping poses for all nine species, also used with Reduce Motion")
+                }
                 Button("Check native panels") {do {try samples.validate()} catch {samples.result=error.localizedDescription}}
-                Button("Arm menu check") {samples.checkMenu(automatic:false)}
+                if !samples.sleepMode {Button("Arm menu check") {samples.checkMenu(automatic:false)}}
             }.padding(22).preferredColorScheme(.dark)
                 .task {
                     samples.desktop.sync()
                     if CommandLine.arguments.contains("--check") {await samples.check()}
                     if CommandLine.arguments.contains("--spawn-check") {samples.checkSpawning()}
                     if CommandLine.arguments.contains("--menu-check") {samples.checkMenu()}
+                    if CommandLine.arguments.contains("--sleep-check") {await samples.checkSleep()}
                 }
                 .onDisappear {samples.desktop.close()}
         }.defaultSize(width:680,height:340)

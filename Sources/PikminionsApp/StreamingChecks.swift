@@ -9,7 +9,7 @@ import Foundation
     func expect(_ value:Bool,_ message:String) throws {if !value {throw SourceFailure.message(message)}}
     let model=SquadModel()
     let agent=AgentRecord(id:"t3:stream-check",source:"Fixture",threadID:"stream-check",runID:"sample-run",title:"Sample streaming",project:"Fixture",model:"Sample",state:.working,detail:"",updated:.now,openURL:nil)
-    model.records=[agent];model.vocal=[]
+    model.records=[agent];model.vocalByDefault=false;model.vocalOverrides=[:]
     let coordinator=ConversationCoordinator(model:model,observesSources:false)
     model.conversationCoordinator=coordinator
     let state=coordinator.state(for:agent);state.vocalPresentation=true
@@ -19,12 +19,12 @@ import Foundation
     var partial:[String:JSONValue]=["id":.string("turn-item-1"),"threadId":.string(agent.threadID),"type":.string("assistant_message"),"messageId":.string("message-1"),"text":.string("I’m keeping **P**"),"streaming":.bool(true)]
     coordinator.applyStreamItem(frame(1,"turn-item.updated",partial),to:state)
     try expect(state.lines.last?.text=="I’m keeping **P**" && state.lines.last?.streaming==true,"Codex partial text must reach the talk state before message completion.")
-    model.vocal=[agent.id];coordinator.close(state.id)
+    model.vocalOverrides=[agent.id:true];coordinator.close(state.id)
     coordinator.receiveOutput(agent,line:ConversationLine(id:"message-1",role:"assistant",text:"I’m keeping **P** as the buy button,",streaming:true),historical:false)
     try expect(state.lines.last?.text.hasSuffix("buy button,")==true && !state.vocalPresentation,"Repeated same-message updates must extend the speech state while a dismissed panel stays closed.")
     coordinator.receiveOutput(agent,line:ConversationLine(id:"message-1",role:"assistant",text:"I’m keeping **P**",streaming:true),historical:false)
     try expect(state.lines.last?.text.hasSuffix("buy button,")==true,"A stale shorter poll must not roll speech text back.")
-    model.vocal=[]
+    model.vocalByDefault=false;model.vocalOverrides=[:]
     partial["text"] = .string("I’m keeping **P** and adding touch controls.")
     coordinator.applyStreamItem(frame(2,"turn-item.updated",partial),to:state)
     try expect(state.lines.count==1 && state.lines.last?.text.contains("touch controls")==true,"The same talk message must grow in place on the next partial frame.")

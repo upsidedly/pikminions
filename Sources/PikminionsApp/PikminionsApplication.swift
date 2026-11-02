@@ -168,7 +168,7 @@ struct SquadView:View {
                             }.padding(.horizontal,8).padding(.vertical,7)
                             .background(model.selectedID==agent.id ? Color.primary.opacity(0.065):.clear,in:RoundedRectangle(cornerRadius:8))
                         }.buttonStyle(.plain).contextMenu {
-                            Toggle("Vocal mode",isOn:Binding(get:{model.vocal.contains(agent.id)},set:{model.setVocalMode($0,for:agent)})).disabled(!agent.isInteractive)
+                            Toggle("Vocal mode",isOn:Binding(get:{model.isVocal(agent)},set:{model.setVocalMode($0,for:agent)})).disabled(!agent.isInteractive)
                             Button("Open conversation"){model.open(agent)}
                             Button(model.pinned.contains(agent.id) ? "Unpin":"Keep visible"){model.togglePin(agent)}
                             Button(model.muted.contains(agent.id) ? "Unmute":"Mute"){model.toggleMute(agent)}
@@ -296,6 +296,8 @@ struct SquadView:View {
                     Button(model.connecting ? "Connecting…":"Connect T3"){model.connect()}.disabled(model.connecting)
                     if model.t3Status.hasPrefix("Connected") {Button("Disconnect & revoke"){model.disconnect()}}
                 }
+                Toggle("Vocal mode by default",isOn:Binding(get:{model.vocalByDefault},set:{model.setVocalDefault($0)}))
+                    .font(.system(size:12)).help("Show incoming messages in speech bubbles. Individual Pikmin choices take priority.")
             }
             Divider()
             VStack(alignment:.leading,spacing:10) {

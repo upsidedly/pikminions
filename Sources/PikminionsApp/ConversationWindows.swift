@@ -83,7 +83,7 @@ private final class SpeechPanel:NSPanel,NSWindowDelegate {
     }
     private func vocalEligible(_ agent:AgentRecord)->Bool {
         guard let model else{return false}
-        return model.vocal.contains(agent.id) && agent.isInteractive && !agent.stale && model.tossProgress[agent.id]==nil && !model.grabbed.contains(agent.id) && model.visibleHeads.contains(where:{$0.id==agent.id})
+        return model.isVocal(agent) && agent.isInteractive && !agent.stale && model.tossProgress[agent.id]==nil && !model.grabbed.contains(agent.id) && model.visibleHeads.contains(where:{$0.id==agent.id})
     }
     private func keepsStream(_ state:ConversationState)->Bool {panels[state.id] != nil || state.islandFocused || vocalEligible(state.agent)}
     func receiveOutput(_ agent:AgentRecord,line:ConversationLine,historical:Bool) {

@@ -34,6 +34,8 @@ enum SquadMode:String,CaseIterable {case desktop="Desktop",island="Island",both=
     var contextMenuHeads:Set<String>=[]
     var attentionGazes:[String:PikminGaze]=[:]
     var idleDirector=PikminIdleDirector()
+    var sleepEvents:[String:PikminSleepEvent]=[:]
+    @ObservationIgnored private var sleepDirector=PikminSleepDirector()
     @ObservationIgnored private var idleTask:Task<Void,Never>?
     var grabAngles:[String:Double]=[:]
     var grabAnchors:[String:UnitPoint]=[:]
@@ -41,7 +43,9 @@ enum SquadMode:String,CaseIterable {case desktop="Desktop",island="Island",both=
     var fixedPositions:Set<String>=Set(UserDefaults.standard.stringArray(forKey:"Pikminions.fixedPositions") ?? [])
     var hidden:Set<String>=Set(UserDefaults.standard.stringArray(forKey:"Pikminions.hidden") ?? [])
     var muted:Set<String>=Set(UserDefaults.standard.stringArray(forKey:"Pikminions.muted") ?? [])
-    var vocal:Set<String>=Set(UserDefaults.standard.stringArray(forKey:"Pikminions.vocal") ?? [])
+    var vocalByDefault=UserDefaults.standard.object(forKey:"Pikminions.vocalByDefault") as? Bool ?? true
+    var vocalOverrides:[String:Bool]=UserDefaults.standard.dictionary(forKey:"Pikminions.vocalOverrides") as? [String:Bool]
+        ?? Dictionary((UserDefaults.standard.stringArray(forKey:"Pikminions.vocal") ?? []).map{($0,true)},uniquingKeysWith:{$1})
     var pinned:Set<String>=Set(UserDefaults.standard.stringArray(forKey:"Pikminions.pinned") ?? [])
     var speciesOverrides:[String:String]=UserDefaults.standard.dictionary(forKey:"Pikminions.species") as? [String:String] ?? [:]
     var customLooks:[PikminLook]=(UserDefaults.standard.data(forKey:"Pikminions.customLooks").flatMap{try? JSONDecoder().decode([PikminLook].self,from:$0)} ?? []).filter(\.isValid)
@@ -126,6 +130,16 @@ enum SquadMode:String,CaseIterable {case desktop="Desktop",island="Island",both=
                 return $0.updated == $1.updated ? $0.id<$1.id:$0.updated>$1.updated
             }.prefix(maxHeads))
     }
+    var desktopHeads:[AgentRecord] {mode == .island ? []:visibleHeads.filter{!docked.contains($0.id)}}
+    func advanceDesktopSleep(at now:Date = .now) {
+        let blocked=grabbed.union(contextMenuHeads).union(tossProgress.keys).union(successes.keys).union(questions.keys)
+        if sleepDirector.advance(at:now,agents:desktopHeads,blocked:blocked) {sleepEvents=sleepDirector.events}
+        for id in sleepEvents.keys where idleDirector.active[id] != nil {idleDirector.suspend(id)}
+    }
+    func wakeDesktopHead(_ id:String,at now:Date = .now) {
+        if sleepDirector.wake(id,at:now) {sleepEvents=sleepDirector.events}
+        idleDirector.suspend(id)
+    }
     func species(for item:AgentRecord)->PikminSpecies {
         look(for:item)?.species ?? speciesOverrides[item.id].flatMap(PikminSpecies.init(rawValue:)) ?? PikminSpecies.assigned(to:item.id)
     }
@@ -160,7 +174,7 @@ enum SquadMode:String,CaseIterable {case desktop="Desktop",island="Island",both=
         conversationCoordinator?.nameChanged(agent)
         preferencesChanged()
     }
-    func showConversation(_ agent:AgentRecord) {conversationCoordinator?.show(agent)}
+    func showConversation(_ agent:AgentRecord) {wakeDesktopHead(agent.id);conversationCoordinator?.show(agent)}
     func hoverHead(_ id:String,inside:Bool) {desktop?.hover(id,inside:inside)}
     func beginContextMenu(_ id:String) {
         contextMenuHeads.insert(id);idleDirector.suspend(id);desktop?.pauseForMenu(id)
@@ -171,7 +185,7 @@ enum SquadMode:String,CaseIterable {case desktop="Desktop",island="Island",both=
     }
     func setAttending(_ id:String,_ value:Bool) {
         let changed=value ? attending.insert(id).inserted:attending.remove(id) != nil
-        if value {desktop?.callToAttention(id)}
+        if value {wakeDesktopHead(id);desktop?.callToAttention(id)}
         if value {idleDirector.suspend(id)}
         else {attentionGazes.removeValue(forKey:id);desktop?.releaseAttention(id)}
         if changed {scheduleOutputPresentation()}
@@ -184,11 +198,21 @@ enum SquadMode:String,CaseIterable {case desktop="Desktop",island="Island",both=
     }
     func setVocalMode(_ enabled:Bool,for agent:AgentRecord) {
         guard agent.isInteractive else{return}
-        if enabled {vocal.insert(agent.id)} else {vocal.remove(agent.id)}
+        vocalOverrides[agent.id]=enabled
         preferencesChanged()
         conversationCoordinator?.vocalModeChanged(agent,enabled:enabled)
     }
-    func toggleVocalMode(_ agent:AgentRecord) {setVocalMode(!vocal.contains(agent.id),for:agent)}
+    func isVocal(_ agent:AgentRecord)->Bool {agent.isInteractive && (vocalOverrides[agent.id] ?? vocalByDefault)}
+    func setVocalDefault(_ enabled:Bool) {
+        guard vocalByDefault != enabled else{return}
+        vocalByDefault=enabled
+        let visible=Set(visibleHeads.map(\.id)).union(attending)
+        for agent in records where visible.contains(agent.id) && vocalOverrides[agent.id]==nil {
+            conversationCoordinator?.vocalModeChanged(agent,enabled:isVocal(agent))
+        }
+        preferencesChanged()
+    }
+    func toggleVocalMode(_ agent:AgentRecord) {setVocalMode(!isVocal(agent),for:agent)}
     func renameHead(_ agent:AgentRecord) {
         conversationCoordinator?.show(agent)
         if let state=conversationCoordinator?.state(for:agent) {state.nameDraft=displayName(agent);state.editingName=true}
@@ -207,13 +231,14 @@ enum SquadMode:String,CaseIterable {case desktop="Desktop",island="Island",both=
     }
     func observeOutput(_ id:String,line:ConversationLine,historical:Bool) {
         guard line.role=="assistant" else{return}
+        if !historical,(liveOutputIDs[id] != line.id || liveOutput[id] != line.text) {wakeDesktopHead(id)}
         if let agent=records.first(where:{$0.id==id}) {conversationCoordinator?.receiveOutput(agent,line:line,historical:historical)}
         liveOutput[id]=line.text
         liveOutputIDs[id]=line.id
         observeSuccess(id,messageID:line.id,text:line.containsAccept==true ? "ACCEPT":line.text,streaming:line.streaming,historical:historical)
         scheduleOutputPresentation()
     }
-    func questionLoaded(_ id:String,document:AgentQuestionDocument) {questions[id]=document;conversationCoordinator?.questionReady(id);scheduleOutputPresentation()}
+    func questionLoaded(_ id:String,document:AgentQuestionDocument) {wakeDesktopHead(id);questions[id]=document;conversationCoordinator?.questionReady(id);scheduleOutputPresentation()}
     func questionResolved(_ id:String,requestID:String) {
         resolvedQuestions[id]=requestID;questions.removeValue(forKey:id)
         if let index=records.firstIndex(where:{$0.id==id && $0.pendingRequestID==requestID}) {
@@ -278,10 +303,11 @@ enum SquadMode:String,CaseIterable {case desktop="Desktop",island="Island",both=
             var random=SystemRandomNumberGenerator()
             while !Task.isCancelled {
                 guard let self else{return}
+                advanceDesktopSleep()
                 let pointer=NSEvent.mouseLocation
                 let eligible=NSWorkspace.shared.accessibilityDisplayShouldReduceMotion ? Set<String>():Set(visibleHeads.filter {agent in
                     let center=anchor(for:agent)
-                    return !agent.stale && [.calm,.working,.happy].contains(agent.mood) && !attending.contains(agent.id) && !contextMenuHeads.contains(agent.id) && !grabbed.contains(agent.id) && tossProgress[agent.id]==nil && successes[agent.id]==nil && hypot(pointer.x-center.midX,pointer.y-center.midY)>110
+                    return !agent.stale && sleepEvents[agent.id]==nil && [.calm,.working,.happy].contains(agent.mood) && !attending.contains(agent.id) && !contextMenuHeads.contains(agent.id) && !grabbed.contains(agent.id) && tossProgress[agent.id]==nil && successes[agent.id]==nil && hypot(pointer.x-center.midX,pointer.y-center.midY)>110
                 }.map(\.id))
                 if idleDirector.advance(at:.now,eligible:eligible,using:&random) {scheduleOutputPresentation()}
                 do {try await Task.sleep(for:.milliseconds(500))} catch{return}
@@ -407,7 +433,8 @@ enum SquadMode:String,CaseIterable {case desktop="Desktop",island="Island",both=
         UserDefaults.standard.set(maxHeads,forKey:"Pikminions.maxHeads")
         UserDefaults.standard.set(Array(hidden),forKey:"Pikminions.hidden")
         UserDefaults.standard.set(Array(muted),forKey:"Pikminions.muted")
-        UserDefaults.standard.set(Array(vocal),forKey:"Pikminions.vocal")
+        UserDefaults.standard.set(vocalByDefault,forKey:"Pikminions.vocalByDefault")
+        UserDefaults.standard.set(vocalOverrides,forKey:"Pikminions.vocalOverrides")
         UserDefaults.standard.set(Array(pinned),forKey:"Pikminions.pinned")
         UserDefaults.standard.set(speciesOverrides,forKey:"Pikminions.species")
         UserDefaults.standard.set(lookAssignments,forKey:"Pikminions.lookAssignments")
@@ -665,7 +692,7 @@ enum SquadMode:String,CaseIterable {case desktop="Desktop",island="Island",both=
             _=try? await sendHost(IslandRequest(operation:"ack",producerID:"dev.upsided.pikminions",token:token,actionID:event.id,result:result,revision:event.actionID=="detach" ? revision*2+1:nil))
     }
     private func islandActions(_ agent:AgentRecord)->[IslandAction] {
-        var actions=[IslandAction(id:"talk",title:"Open conversation bubble"),IslandAction(id:"vocal",title:vocal.contains(agent.id) ? "Disable vocal mode":"Enable vocal mode"),IslandAction(id:"detach",title:"To desktop"),IslandAction(id:"collaborate",title:"Collaborate…"),IslandAction(id:"open",title:"Open in T3"),IslandAction(id:"mute",title:muted.contains(agent.id) ? "Unmute":"Mute")]
+        var actions=[IslandAction(id:"talk",title:"Open conversation bubble"),IslandAction(id:"vocal",title:isVocal(agent) ? "Disable vocal mode":"Enable vocal mode"),IslandAction(id:"detach",title:"To desktop"),IslandAction(id:"collaborate",title:"Collaborate…"),IslandAction(id:"open",title:"Open in T3"),IslandAction(id:"mute",title:muted.contains(agent.id) ? "Unmute":"Mute")]
         if agent.state.isActive {actions.append(IslandAction(id:"steer",title:"Steer this reply now"))}
         return actions
     }
@@ -696,7 +723,7 @@ enum SquadMode:String,CaseIterable {case desktop="Desktop",island="Island",both=
         if actionID=="blur" {coordinator.blurIsland(agent.id);return "Hidden"}
         if actionID=="talk" {coordinator.show(agent);return "Opened bubble"}
         if actionID=="collaborate" {coordinator.prepareCollaboration(agent);return "Choose a collaborator"}
-        if actionID=="vocal" {toggleVocalMode(agent);return vocal.contains(agent.id) ? "Vocal mode on":"Vocal mode off"}
+        if actionID=="vocal" {toggleVocalMode(agent);return isVocal(agent) ? "Vocal mode on":"Vocal mode off"}
         if actionID=="reconnect" {connect();return "Reconnecting T3"}
         let state=coordinator.state(for:agent)
         guard !state.sending else{return "Error: Wait for this Pikmin’s current submission."}

@@ -6,6 +6,7 @@ import SwiftUI
 import AppKit
 
 @MainActor func runPikminChecks() throws {
+    try runPikminSleepChecks()
     func expect(_ condition:Bool,_ label:String) throws {
         if !condition {throw SourceFailure.message("Check failed: "+label)}
     }

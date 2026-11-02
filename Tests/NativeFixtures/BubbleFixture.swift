@@ -60,14 +60,14 @@ import SwiftUI
         showingPanel=true
         state.question=nil;state.agent.state = .working
         sequence+=1;speechChunk=1;state.lines=[]
-        model.hidden=[];model.docked=[];model.vocal=[state.id]
+        model.hidden=[];model.docked=[];model.vocalOverrides=[state.id:true]
         emitSpeech(complete:false)
         coordinator.focusSpeech(state)
         speechFeed?.cancel()
     }
     func previewSpeech() {
         coordinator.close(state.id);speechFeed?.cancel()
-        model.vocal=[];showingPanel=false;state.question=nil;state.agent.state = .working
+        model.vocalByDefault=false;model.vocalOverrides=[:];showingPanel=false;state.question=nil;state.agent.state = .working
         sequence+=1;speechChunk=1;state.lines=[];state.vocalPresentation=true;emitSpeech(complete:false)
     }
     func appendSpeech(poll:Bool=false) {

@@ -61,3 +61,23 @@ struct PikminIdleDirector {
         return before != active
     }
 }
+
+/// Focused, rhythmic effort while a real agent is working. A complete cycle
+/// joins the resting pose, including generated island animation frames.
+struct PikminWorkPose:Equatable,Sendable {
+    var motion:PikminIdlePose = .rest
+    var effort=0.0
+    static let rest=Self()
+    static func make(time:Double)->Self {
+        guard time>0 else{return .rest}
+        let p=time.truncatingRemainder(dividingBy:4.8)/4.8,envelope=pow(sin(p*Double.pi),2)
+        func pulse(_ center:Double,_ width:Double)->Double {let value=max(0,1-abs(p-center)/width);return pow(sin(value*Double.pi/2),2)}
+        let nod=pulse(0.22,0.085)+pulse(0.40,0.085)
+        var pose=PikminIdlePose.rest
+        pose.tilt=(-4+sin(p*4*Double.pi)*1.2)*envelope;pose.y=3.2*nod
+        pose.scaleX=1+0.02*nod;pose.scaleY=1-0.025*nod
+        pose.leaf=sin(p*8*Double.pi)*8*envelope
+        pose.blink=1-0.18*envelope;pose.lookX=sin(p*6*Double.pi)*0.45*envelope
+        return Self(motion:pose,effort:pulse(0.65,0.14)*0.8)
+    }
+}

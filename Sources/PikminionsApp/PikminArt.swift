@@ -67,22 +67,24 @@ struct PikminHead:View {
     var focusGaze:PikminGaze?
     var idleEvent:PikminIdleEvent?
     var appearance:PikminLook?
+    var sleepEvent:PikminSleepEvent?
     @State private var cursorProbe=PikminCursorProbe()
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.islandContentActive) private var contentActive
     var body:some View {
         Group {
-            if (animated || tracksCursor) && !reduceMotion && mood != .disconnected {
-                TimelineView(.animation(minimumInterval:1/30,paused:!contentActive)) { context in
-                    PikminDrawing(species:species,mood:mood,growth:growth,time:animated ? context.date.timeIntervalSinceReferenceDate+phase:0,gaze:focusGaze ?? (tracksCursor ? cursorProbe.gaze(profile:appearance?.top ?? species.top):.zero),idle:animated ? idleEvent?.pose(at:context.date) ?? .rest:.rest,appearance:appearance)
+            if (animated || tracksCursor || sleepEvent != nil) && !reduceMotion && mood != .disconnected {
+                TimelineView(.animation(minimumInterval:sleepEvent?.isSleeping==true ? 1/15:1/30,paused:!contentActive)) { context in
+                    let resting=sleepEvent?.isSleeping==true
+                    PikminDrawing(species:species,mood:mood,growth:growth,time:animated ? context.date.timeIntervalSinceReferenceDate+phase:0,gaze:resting ? .zero:focusGaze ?? (tracksCursor ? cursorProbe.gaze(profile:appearance?.top ?? species.top):.zero),idle:animated && sleepEvent==nil ? idleEvent?.pose(at:context.date) ?? .rest:.rest,appearance:appearance,rest:sleepEvent?.pose(at:context.date) ?? .awake)
                 }
-            } else { PikminDrawing(species:species,mood:mood,growth:growth,time:0,gaze:focusGaze ?? .zero,appearance:appearance) }
+            } else { PikminDrawing(species:species,mood:mood,growth:growth,time:0,gaze:sleepEvent?.isSleeping==true ? .zero:focusGaze ?? .zero,appearance:appearance,rest:sleepEvent?.reducedMotionPose ?? .awake) }
         }
         .aspectRatio(100/120,contentMode:.fit)
         .background(PikminCursorAnchor(probe:cursorProbe))
         .saturation(mood == .disconnected ? 0.25 : 1)
         .opacity(mood == .disconnected ? 0.6 : 1)
-        .accessibilityLabel("\(appearance?.name ?? species.name) Pikmin, \(mood.rawValue)")
+        .accessibilityLabel("\(appearance?.name ?? species.name) Pikmin, \(sleepEvent?.label.lowercased() ?? mood.rawValue)")
     }
 }
 struct PikminDrawing:View {
@@ -93,6 +95,7 @@ struct PikminDrawing:View {
     var gaze:PikminGaze = .zero
     var idle:PikminIdlePose = .rest
     var appearance:PikminLook?
+    var rest:PikminSleepPose = .awake
     var body:some View {
         Canvas { original,size in
             var c=original
@@ -103,15 +106,17 @@ struct PikminDrawing:View {
             c.scaleBy(x:scale,y:scale)
             let lively=mood == .working || mood == .attention || mood == .question
             let cycle=time.truncatingRemainder(dividingBy:4.8)/4.8*2*Double.pi
-            let sway=time==0 ? 0 : sin(cycle*(lively ? 2:1))*2.1
-            let breathe=time==0 ? 0 : sin(cycle*2)*0.65
+            let work=mood == .working ? PikminWorkPose.make(time:time):.rest
+            let effort=1-rest.sleepiness
+            let sway=time==0 ? 0 : sin(cycle*(lively ? 2:1))*2.1*(1-rest.sleepiness)
+            let breathe=time==0 ? 0 : sin(cycle*2)*0.65*(1-rest.sleepiness)
             let question=mood == .question
             let beat=time.truncatingRemainder(dividingBy:4.8)/4.8
             let hop=question && time != 0 ? (beat<0.13 ? sin(beat/0.13*Double.pi)*8:beat>0.15 && beat<0.28 ? sin((beat-0.15)/0.13*Double.pi)*5:0):0
-            c.translateBy(x:0,y:profile.offset+breathe-hop+idle.y)
-            let tilt=(question && time != 0 ? sin(cycle)*8.5:0)+gaze.x*3+idle.tilt
+            c.translateBy(x:0,y:profile.offset+breathe-hop+idle.y+rest.y+work.motion.y*effort)
+            let tilt=(question && time != 0 ? sin(cycle)*8.5:0)+gaze.x*3*effort+idle.tilt+rest.tilt+work.motion.tilt*effort
             c.translateBy(x:50,y:82);c.rotate(by:.degrees(tilt));c.translateBy(x:-50,y:-82)
-            c.translateBy(x:50,y:82);c.scaleBy(x:idle.scaleX,y:idle.scaleY);c.translateBy(x:-50,y:-82)
+            c.translateBy(x:50,y:82);c.scaleBy(x:idle.scaleX*rest.scaleX*(1+(work.motion.scaleX-1)*effort),y:idle.scaleY*rest.scaleY*(1+(work.motion.scaleY-1)*effort));c.translateBy(x:-50,y:-82)
             let bodyHex=appearance?.bodyHex ?? species.hex
             let outlineHex=PikminSpecies.darkened(bodyHex)
             let flowerHex=appearance?.flowerHex ?? species.flowerHex
@@ -147,7 +152,7 @@ struct PikminDrawing:View {
             let base:Double=species == .rock ? 48:50
             let tip=actualGrowth == .leaf && species != .glow && appearance == nil ? min(54,profile.tipX):profile.tipX
             let terminalX=(appearance == nil ? tip:max(actualGrowth == .leaf ? 18:28,min(actualGrowth == .leaf ? 54:72,tip)))+sway
-            let terminalY=(actualGrowth == .leaf ? 34.0:actualGrowth == .bud ? 35.0:30.0)-profile.offset
+            let terminalY=(actualGrowth == .leaf ? 34.0:actualGrowth == .bud ? 35.0:30.0)-profile.offset+rest.stemDrop
             let half=profile.stemWidth/2
             var stem=Path();stem.move(to:CGPoint(x:base-half,y:72))
             stem.addCurve(to:CGPoint(x:terminalX,y:terminalY),control1:CGPoint(x:base-half-2,y:30),control2:CGPoint(x:terminalX+half-3,y:terminalY+22))
@@ -155,9 +160,10 @@ struct PikminDrawing:View {
             stem.closeSubpath();c.fill(stem,with:.color(Color(islandHex:profile.stemHex)))
             recordOutline(stem,hex:PikminSpecies.darkened(profile.stemHex))
             var plant=c;plant.translateBy(x:terminalX,y:terminalY)
-            plant.rotate(by:.degrees(sway*1.6+idle.leaf))
+            let leafAngle=sway*1.6+idle.leaf+rest.leaf+work.motion.leaf*effort
+            plant.rotate(by:.degrees(leafAngle))
             func plantOutline(_ path:Path,angle:Double=0,hex:String) {
-                let rotated=path.applying(CGAffineTransform(rotationAngle:(sway*1.6+idle.leaf+angle)*Double.pi/180))
+                let rotated=path.applying(CGAffineTransform(rotationAngle:(leafAngle+angle)*Double.pi/180))
                 recordOutline(rotated.applying(CGAffineTransform(translationX:terminalX,y:terminalY)),hex:hex)
             }
             switch actualGrowth {
@@ -261,12 +267,14 @@ struct PikminDrawing:View {
             // Sparse, round eyes keep the expression close to Nintendo's flat silhouettes.
             let blinkPhase=(time+Double(PikminSpecies.allCases.firstIndex(of:species) ?? 0)*0.31).truncatingRemainder(dividingBy:4.8)
             let blink=time != 0 && blinkPhase>4.48 ? min(1,max(0.08,abs(blinkPhase-4.59)/0.11)) : 1
-            let eyeOpen=mood == .sleeping ? 0.12 : min(blink,idle.blink)
-            let eyeX=max(-1,min(1,gaze.x+idle.lookX)),eyeVertical=max(-1,min(1,gaze.y+idle.lookY))
+            let eyeOpen=mood == .sleeping ? 0.12 : min(blink,idle.blink,work.motion.blink)
+            let eyeX=max(-1,min(1,gaze.x+idle.lookX+work.motion.lookX*effort)),eyeVertical=max(-1,min(1,gaze.y+idle.lookY))
             let look=(time==0 ? 0:sin(cycle)*0.45)+eyeX*2
             let lookY=eyeVertical*1.8
             let eyeY:Double=species == .winged ? 68 : species == .rock ? 72 : species == .purple ? 75 : 76
             let eyeXs:[Double]=species == .white ? [31,66] : species == .purple ? [24,77] : species == .winged ? [34,66] : species == .glow ? [36,67] : [31,68]
+            let faceOpacity=c.opacity
+            c.opacity*=1-rest.sleepiness
             for x in eyeXs {
                 if species == .white {
                     ellipse(CGRect(x:x-6.3+eyeX*1.2,y:eyeY-6.3*eyeOpen+lookY*0.5*eyeOpen,width:12.6,height:12.6*eyeOpen),Color(islandHex:appearance?.eyeHex ?? "F0444E"))
@@ -283,7 +291,21 @@ struct PikminDrawing:View {
                     ellipse(CGRect(x:x-3+look,y:eyeY-3.2*eyeOpen+lookY*eyeOpen,width:6.2,height:6.4*eyeOpen),Color(islandHex:appearance?.eyeHex ?? "172629"))
                 }
             }
-            if species == .blue {
+            c.opacity=faceOpacity
+            if rest.sleepiness>0 {
+                let ink=Color(islandHex:appearance?.eyeHex.map{PikminSpecies.darkened($0)} ?? outlineHex)
+                for x in eyeXs {
+                    let width:Double=species == .winged ? 8:species == .white ? 5:6
+                    var lid=Path();lid.move(to:CGPoint(x:x-width,y:eyeY))
+                    lid.addQuadCurve(to:CGPoint(x:x+width,y:eyeY),control:CGPoint(x:x,y:eyeY+5))
+                    c.stroke(lid,with:.color(ink.opacity(rest.sleepiness)),style:StrokeStyle(lineWidth:max(2.6,1.1/scale),lineCap:.round))
+                }
+            }
+            if rest.yawn>0.01 {
+                let mouth=Path(ellipseIn:CGRect(x:48-rest.yawn*2,y:91-rest.yawn,width:4+rest.yawn*4,height:2+rest.yawn*11))
+                c.fill(mouth,with:.color(Color(islandHex:outlineHex)))
+                c.fill(Path(ellipseIn:CGRect(x:49,y:96+rest.yawn,width:4,height:4*rest.yawn)),with:.color(Color(islandHex:"EFA7A8")))
+            } else if species == .blue {
                 var mouth=Path();mouth.move(to:CGPoint(x:45,y:94));mouth.addQuadCurve(to:CGPoint(x:59,y:96),control:CGPoint(x:52,y:89))
                 mouth.addQuadCurve(to:CGPoint(x:45,y:94),control:CGPoint(x:52,y:93));c.fill(mouth,with:.color(Color(islandHex:"E88E9D")))
             }
@@ -292,6 +314,25 @@ struct PikminDrawing:View {
             var border=c;border.blendMode = .destinationOver
             for item in outlinePaths {
                 border.stroke(item.path,with:.color(Color(islandHex:item.hex)),style:StrokeStyle(lineWidth:max(7.2,1.5/scale),lineCap:.round,lineJoin:.round))
+            }
+            if work.effort>0 {
+                var bead=c;bead.opacity*=work.effort*effort
+                var drop=Path();drop.move(to:CGPoint(x:84,y:56))
+                drop.addCurve(to:CGPoint(x:80,y:65),control1:CGPoint(x:82,y:61),control2:CGPoint(x:78,y:62))
+                drop.addCurve(to:CGPoint(x:88,y:65),control1:CGPoint(x:80,y:71),control2:CGPoint(x:88,y:71))
+                drop.addQuadCurve(to:CGPoint(x:84,y:56),control:CGPoint(x:90,y:62))
+                bead.fill(drop,with:.color(Color(islandHex:"B5E4EC")))
+                bead.stroke(drop,with:.color(Color(islandHex:outlineHex)),style:StrokeStyle(lineWidth:max(2,0.8/scale),lineCap:.round,lineJoin:.round))
+            }
+            if rest.zOpacity>0 {
+                var dream=c;dream.opacity*=rest.zOpacity
+                let height=max(7,4.8/scale)
+                for (x,y,factor) in [(80.0,53.0,1.0),(92.0,42.0,0.65)] {
+                    let h=height*factor,w=h*0.75
+                    var z=Path();z.addLines([CGPoint(x:x-w/2,y:y-rest.zRise),CGPoint(x:x+w/2,y:y-rest.zRise),CGPoint(x:x-w/2,y:y+h-rest.zRise),CGPoint(x:x+w/2,y:y+h-rest.zRise)])
+                    dream.stroke(z,with:.color(Color(islandHex:outlineHex)),style:StrokeStyle(lineWidth:max(4,2/scale),lineCap:.round,lineJoin:.round))
+                    dream.stroke(z,with:.color(Color(islandHex:"FCFDF3")),style:StrokeStyle(lineWidth:max(1.8,0.9/scale),lineCap:.round,lineJoin:.round))
+                }
             }
             if question {
                 let radius=max(7,4.7/scale)

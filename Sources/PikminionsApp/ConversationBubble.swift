@@ -15,8 +15,13 @@ struct ConversationBubble:View {
     private var canWrite:Bool {model.conversationReady && agent.isInteractive && !agent.stale && !state.sending}
     private var displayedLines:[ConversationLine] {state.lines}
     var body:some View {
-        if state.vocalPresentation {VocalSpeechBubble(model:model,state:state,coordinator:coordinator)}
-        else {conversation}
+        Group {
+            if state.vocalPresentation {VocalSpeechBubble(model:model,state:state,coordinator:coordinator)}
+            else {conversation}
+        }
+        .onChange(of:state.draft) {_,_ in model.wakeDesktopHead(agent.id)}
+        .onChange(of:state.nameDraft) {_,_ in model.wakeDesktopHead(agent.id)}
+        .onChange(of:state.collaborationDraft) {_,_ in model.wakeDesktopHead(agent.id)}
     }
     private var conversation:some View {
         VStack(spacing:0) {
@@ -92,7 +97,7 @@ struct ConversationBubble:View {
             Menu {
                 Button("Rename Pikmin…") {state.nameDraft=model.displayName(agent);state.editingName=true}
                 Button("Collaborate…") {state.choosingPartner=true}.disabled(!agent.isInteractive)
-                Toggle("Vocal mode",isOn:Binding(get:{model.vocal.contains(agent.id)},set:{model.setVocalMode($0,for:agent)})).disabled(!agent.isInteractive)
+                Toggle("Vocal mode",isOn:Binding(get:{model.isVocal(agent)},set:{model.setVocalMode($0,for:agent)})).disabled(!agent.isInteractive)
                 Divider()
                 Button("Retry last instruction…") {state.retryConfirmation=true}.disabled(!canWrite || agent.state.isActive)
                 Button("Fork conversation") {coordinator.create(state,fork:true)}.disabled(!canWrite)

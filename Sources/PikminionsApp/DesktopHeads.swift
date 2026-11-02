@@ -96,7 +96,8 @@ private final class HeadPanel:NSPanel {
     }
     func sync() {
         guard let model else{return}
-        let agents=model.mode == .island ? []:model.visibleHeads.filter{!model.docked.contains($0.id)}
+        let agents=model.desktopHeads
+        model.advanceDesktopSleep()
         let ids=Set(agents.map(\.id))
         for id in Array(panels.keys) where !ids.contains(id) && !model.contextMenuHeads.contains(id) {
             model.endDrag(id)
@@ -120,7 +121,9 @@ private final class HeadPanel:NSPanel {
             let saved=UserDefaults.standard.array(forKey:"Pikminions.position."+agent.id) as? [Double]
             let preferred=saved.flatMap {values -> CGPoint? in
                 guard values.count==2,values.allSatisfy(\.isFinite) else{return nil}
-                return CGPoint(x:values[0],y:values[1])
+                // AppKit rounds fractional initial window edges outward, which
+                // can otherwise enlarge a restored head by a whole point.
+                return CGPoint(x:values[0].rounded(),y:values[1].rounded())
             }
             return (agent,preferred)
         }
@@ -243,6 +246,7 @@ private final class HeadPanel:NSPanel {
     }
     private func startSwing(_ id:String,anchor:UnitPoint) {
         guard let model else{return}
+        model.wakeDesktopHead(id)
         model.grabbed.insert(id);model.grabAnchors[id]=anchor
         swings.removeValue(forKey:id)?.cancel()
         guard !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion else{return}
@@ -387,9 +391,11 @@ struct DesktopHead:View {
     var body:some View {
         if let agent=model.records.first(where:{$0.id==id}) ?? menuAgent {
             let size=model.size(for:agent)
+            let sleep=model.sleepEvents[id]
+            let status=sleep?.label ?? agent.statusLabel
             VStack(spacing:0) {
                 Button {model.showConversation(agent)} label:{
-                    PikminHead(species:model.species(for:agent),mood:agent.stale ? .disconnected:model.successes[id] != nil ? .happy:agent.mood,growth:model.growth,animated:!model.attending.contains(id) && !model.grabbed.contains(id) && !model.contextMenuHeads.contains(id),tracksCursor:!model.contextMenuHeads.contains(id),phase:Double(abs(id.hashValue%20)),focusGaze:model.attentionGazes[id],idleEvent:model.idleDirector.active[id],appearance:model.look(for:agent))
+                    PikminHead(species:model.species(for:agent),mood:agent.stale ? .disconnected:model.successes[id] != nil ? .happy:agent.mood,growth:model.growth,animated:!model.attending.contains(id) && !model.grabbed.contains(id) && !model.contextMenuHeads.contains(id),tracksCursor:!model.contextMenuHeads.contains(id),phase:Double(abs(id.hashValue%20)),focusGaze:model.attentionGazes[id],idleEvent:model.idleDirector.active[id],appearance:model.look(for:agent),sleepEvent:sleep)
                         .frame(width:size.artSize.width,height:size.artSize.height)
                         .modifier(IslandSuccessEffect(trigger:model.attending.contains(id) ? nil:model.successes[id]?.id,amplitude:0))
                         .scaleEffect(1-0.68*(model.tossProgress[id] ?? 0))
@@ -404,10 +410,10 @@ struct DesktopHead:View {
                             }
                         }
                 }.buttonStyle(.plain)
-                .accessibilityLabel(model.displayName(agent)+", "+agent.statusLabel)
+                .accessibilityLabel(model.displayName(agent)+", "+status)
                 .accessibilityAction(named:Text("Dismiss to island")) {model.dismiss(agent)}
                 .accessibilityAction(named:Text("Rename Pikmin")) {model.renameHead(agent)}
-                .accessibilityAction(named:Text(model.vocal.contains(id) ? "Disable vocal mode":"Enable vocal mode")) {model.toggleVocalMode(agent)}
+                .accessibilityAction(named:Text(model.isVocal(agent) ? "Disable vocal mode":"Enable vocal mode")) {model.toggleVocalMode(agent)}
                 .accessibilityValue("Size "+size.title)
                 .accessibilityActions {
                     ForEach(PikminSize.allCases) {size in Button("Size "+size.title) {model.setSize(size,for:agent)}}
@@ -422,7 +428,7 @@ struct DesktopHead:View {
                 guard !model.grabbed.contains(id),model.tossProgress[id]==nil else{return []}
                 return DesktopHeadContextMenu.items(model:model,id:id)
             }
-            .help(model.displayName(agent)+" · "+agent.statusLabel)
+            .help(model.displayName(agent)+" · "+status)
         }
     }
 }
@@ -435,7 +441,7 @@ struct DesktopHead:View {
         func perform(_ action:(AgentRecord)->Void) {
             guard let current=model.records.first(where:{$0.id==id}) else{return};action(current)
         }
-        let vocal=model.vocal.contains(id),size=model.size(for:agent)
+        let vocal=model.isVocal(agent),size=model.size(for:agent)
         let species=PikminSpecies.allCases.map {value in IslandContextMenuItem(value.name) {perform{model.setSpecies(value,for:$0)}}}
         let looks=model.customLooks.map {look in IslandContextMenuItem(look.name) {perform{model.chooseLook(look,for:$0)}}}
         let appearance=species+(looks.isEmpty ? []:[.separator]+looks)+[.separator,IslandContextMenuItem("Customize…") {perform{model.editLook(model.look(for:$0),for:$0)}}]
