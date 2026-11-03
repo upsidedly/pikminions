@@ -534,14 +534,14 @@ private final class SpeechPanel: NSPanel, NSWindowDelegate {
             if case .number(let sequence) = item["snapshotSequence"] {
                 state.lastSequence = sequence
             }
-            state.lines = AgentSources.projectionLines(item["projection"])
+            state.lines = T3ConversationParser.projectionLines(item["projection"])
             if let line = state.lines.last(where: { $0.role == "assistant" }) {
                 model.observeOutput(state.id, line: line, historical: true)
             }
         } else if item["kind"]?.string == "event", let event = item["event"],
             let payload = event["payload"]
         {
-            if let line = AgentSources.eventLine(event, threadID: state.agent.threadID) {
+            if let line = T3ConversationParser.eventLine(event, threadID: state.agent.threadID) {
                 state.append(line)
                 if line.role == "assistant" {
                     model.observeOutput(state.id, line: line, historical: false)

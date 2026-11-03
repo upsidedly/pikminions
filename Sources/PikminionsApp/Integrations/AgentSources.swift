@@ -2,116 +2,7 @@
 // Copyright (c) 2026 Matthew Williams
 
 import Antille
-import CSQLite
 import Foundation
-
-enum PikminKeychain {
-    static func read(_ account: String) -> String? {
-        LocalCredentialStore.read(service: "dev.upsided.pikminions", account: account)
-    }
-    static func save(_ value: String, account: String) throws {
-        try LocalCredentialStore.save(value, service: "dev.upsided.pikminions", account: account)
-    }
-    static func delete(_ account: String) {
-        LocalCredentialStore.delete(service: "dev.upsided.pikminions", account: account)
-    }
-}
-struct SQLiteMetadata {
-    static func rows(path: String, sql: String) throws -> [[String: String]] {
-        var db: OpaquePointer?
-        guard
-            sqlite3_open_v2(path, &db, SQLITE_OPEN_READONLY | SQLITE_OPEN_NOMUTEX, nil)
-                == SQLITE_OK, let db
-        else {
-            if let db { sqlite3_close(db) }
-            throw SourceFailure.message("Recorded metadata is unavailable.")
-        }
-        defer { sqlite3_close(db) }
-        sqlite3_busy_timeout(db, 150)
-        sqlite3_exec(db, "PRAGMA query_only=ON", nil, nil, nil)
-        var statement: OpaquePointer?
-        guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK, let statement else {
-            throw SourceFailure.message("This metadata version is not supported.")
-        }
-        defer { sqlite3_finalize(statement) }
-        var result: [[String: String]] = []
-        var status = sqlite3_step(statement)
-        while status == SQLITE_ROW {
-            var row: [String: String] = [:]
-            for i in 0..<sqlite3_column_count(statement) {
-                guard let name = sqlite3_column_name(statement, i),
-                    let text = sqlite3_column_text(statement, i)
-                else { continue }
-                row[String(cString: name)] = String(cString: text)
-            }
-            result.append(row)
-            status = sqlite3_step(statement)
-        }
-        guard status == SQLITE_DONE else {
-            throw SourceFailure.message("Recorded metadata could not be read completely.")
-        }
-        return result
-    }
-    static func codexAliases() -> [String: String] {
-        let path = FileManager.default.homeDirectoryForCurrentUser.appending(
-            path: ".t3/userdata/statev2.sqlite"
-        ).path
-        let sql =
-            "SELECT provider_thread_id,json_extract(payload_json,'$.nativeThreadRef.nativeId') AS native_id FROM orchestration_v2_projection_provider_threads WHERE driver='codex' AND json_extract(payload_json,'$.nativeThreadRef.strength')='strong'"
-        let rows = (try? rows(path: path, sql: sql)) ?? []
-        return Dictionary(
-            rows.compactMap { row -> (String, String)? in
-                guard let id = row["provider_thread_id"], let native = row["native_id"],
-                    !native.isEmpty
-                else { return nil }
-                return (id, native)
-            }, uniquingKeysWith: { $1 })
-    }
-    static func recordedCodex() throws -> [AgentRecord] {
-        let home = FileManager.default.homeDirectoryForCurrentUser.appending(path: ".codex")
-        let threads = try rows(
-            path: home.appending(path: "state_5.sqlite").path,
-            sql:
-                "SELECT id,title,name,cwd,COALESCE(updated_at_ms,updated_at*1000) AS updated FROM threads WHERE archived=0 ORDER BY updated DESC LIMIT 60"
-        )
-        let history =
-            (try? rows(
-                path: home.appending(path: "thread_history_1.sqlite").path,
-                sql:
-                    "SELECT thread_id,turn_id,status,completed_at FROM thread_turns t WHERE rollout_ordinal=(SELECT MAX(rollout_ordinal) FROM thread_turns x WHERE x.thread_id=t.thread_id)"
-            )) ?? []
-        let byID = Dictionary(
-            history.compactMap { row -> (String, [String: String])? in
-                row["thread_id"].map { ($0, row) }
-            }, uniquingKeysWith: { $1 })
-        let edges =
-            (try? rows(
-                path: home.appending(path: "state_5.sqlite").path,
-                sql: "SELECT parent_thread_id,child_thread_id FROM thread_spawn_edges")) ?? []
-        let parents = Dictionary(
-            edges.compactMap { row -> (String, String)? in
-                guard let c = row["child_thread_id"], let p = row["parent_thread_id"] else {
-                    return nil
-                }
-                return (c, p)
-            }, uniquingKeysWith: { $1 })
-        return threads.compactMap { row in
-            guard let id = row["id"] else { return nil }
-            let turn = byID[id]
-            return AgentRecord(
-                id: "codex:" + id, nativeID: id, source: "Codex", threadID: id,
-                runID: turn?["turn_id"] ?? "",
-                title: row["name"].flatMap { $0.isEmpty ? nil : $0 } ?? row["title"]
-                    ?? "Codex conversation",
-                project: URL(fileURLWithPath: row["cwd"] ?? "").lastPathComponent, model: "Codex",
-                state: .recorded,
-                detail: "Last recorded: \(turn?["status"] ?? "unknown"). Live server unavailable.",
-                parentID: parents[id].map { "codex:" + $0 },
-                updated: Date(timeIntervalSince1970: (Double(row["updated"] ?? "") ?? 0) / 1000),
-                openURL: nil, stale: true, silent: true)
-        }
-    }
-}
 
 actor AgentSources {
     private let fixture: FixtureAgentSource? = AppRuntime.fixture ? FixtureAgentSource() : nil
@@ -493,26 +384,7 @@ actor AgentSources {
     }
     func conversation(for agent: AgentRecord) async throws -> [ConversationLine] {
         let snapshot = try await bounded(agent)
-        return Self.projectionLines(snapshot["projection"])
-    }
-    /// Visible turn items include inherited fork history. `messages` contains
-    /// only local records, and may carry text omitted from the visible row.
-    static func projectionLines(_ projection: JSONValue?) -> [ConversationLine] {
-        let local = lines(projection?["messages"]?.array ?? [])
-        let byID = Dictionary(local.map { ($0.id, $0) }, uniquingKeysWith: { _, new in new })
-        let visible = (projection?["visibleTurnItems"]?.array ?? []).compactMap {
-            row -> ConversationLine? in
-            guard let item = row["item"], let type = item["type"]?.string,
-                ["assistant_message", "user_message"].contains(type),
-                let id = item["messageId"]?.string
-            else { return nil }
-            if item["textOmitted"]?.bool == true { return byID[id] }
-            guard let text = item["text"]?.string else { return byID[id] }
-            return ConversationLine(
-                id: id, role: type == "assistant_message" ? "assistant" : "user",
-                text: String(text.prefix(24000)), streaming: item["streaming"]?.bool ?? false)
-        }
-        return visible.isEmpty ? local : Array(visible.suffix(30))
+        return T3ConversationParser.projectionLines(snapshot["projection"])
     }
     func canaryDiagnostics(_ agent: AgentRecord) async throws -> JSONValue {
         guard ephemeralCredentials, agent.title.hasPrefix("Pikminions TEST - "), let token else {
@@ -537,47 +409,6 @@ actor AgentSources {
         return .object([
             "fieldNames": names, "fields": .object(fields.filter { keys.contains($0.key) }),
         ])
-    }
-    static func lines(_ values: [JSONValue]) -> [ConversationLine] {
-        values.suffix(30).compactMap { value in
-            guard let id = value["id"]?.string, let role = value["role"]?.string,
-                let text = value["text"]?.string, ["user", "assistant"].contains(role)
-            else { return nil }
-            return ConversationLine(
-                id: id, role: role, text: String(text.prefix(24000)),
-                streaming: value["streaming"]?.bool ?? false)
-        }
-    }
-    /// Codex publishes partial assistant text as turn items; message.updated may
-    /// only arrive at completion. Both records share the conversation message ID.
-    static func eventLine(_ event: JSONValue, threadID: String) -> ConversationLine? {
-        guard let payload = event["payload"], payload["textOmitted"]?.bool != true,
-            let text = payload["text"]?.string
-        else { return nil }
-        if let owner = payload["threadId"]?.string ?? event["threadId"]?.string, owner != threadID {
-            return nil
-        }
-        let id: String
-        let role: String
-        switch event["type"]?.string {
-        case "message.updated":
-            guard let messageID = payload["id"]?.string, let messageRole = payload["role"]?.string,
-                ["user", "assistant"].contains(messageRole)
-            else { return nil }
-            id = messageID
-            role = messageRole
-        case "turn-item.updated":
-            guard let kind = payload["type"]?.string,
-                ["assistant_message", "user_message"].contains(kind),
-                let messageID = payload["messageId"]?.string
-            else { return nil }
-            id = messageID
-            role = kind == "assistant_message" ? "assistant" : "user"
-        default: return nil
-        }
-        return ConversationLine(
-            id: id, role: role, text: IslandMarkdown.tail(text, maxBytes: 24000),
-            streaming: payload["streaming"]?.bool ?? false, containsAccept: text.contains("ACCEPT"))
     }
     func conversationStream(for agent: AgentRecord, afterSequence: Double? = nil) async throws
         -> AsyncThrowingStream<JSONValue, Error>
@@ -680,47 +511,7 @@ actor AgentSources {
     }
     func codex() async throws -> (records: [AgentRecord], live: Bool) {
         if fixture != nil { return ([], false) }
-        let home = FileManager.default.homeDirectoryForCurrentUser
-        let socket = home.appending(path: ".codex/app-server-control/app-server-control.sock")
-        if FileManager.default.fileExists(atPath: socket.path) {
-            do {
-                let data = try await LocalProcessJob().run(
-                    executable: "/opt/homebrew/bin/codex", arguments: ["app-server", "proxy"],
-                    rpc: true)
-                struct Page: Decodable { var data: [Thread] }
-                struct Thread: Decodable {
-                    var id: String
-                    var name: String?
-                    var cwd: String?
-                    var status: Status
-                    struct Status: Decodable {
-                        var type: String
-                        var activeFlags: [String]?
-                    }
-                }
-                let page = try JSONDecoder().decode(Page.self, from: data)
-                let records = page.data.map { thread -> AgentRecord in
-                    let flags = thread.status.activeFlags ?? []
-                    let state: AgentState =
-                        flags.contains("waitingOnApproval")
-                        ? .waitingApproval
-                        : flags.contains("waitingOnUserInput")
-                            ? .waitingInput
-                            : thread.status.type == "active"
-                                ? .working : thread.status.type == "systemError" ? .failed : .idle
-                    return AgentRecord(
-                        id: "codex:" + thread.id, nativeID: thread.id, source: "Codex",
-                        threadID: thread.id, runID: thread.id,
-                        title: thread.name ?? "Codex conversation",
-                        project: URL(fileURLWithPath: thread.cwd ?? "").lastPathComponent,
-                        model: "Codex", state: state, detail: "", parentID: nil, updated: .now,
-                        openURL: nil, stale: thread.status.type == "notLoaded")
-                }
-                return (records, true)
-            } catch {
-                // A failed shared-server read falls back to explicitly recorded history.
-            }
-        }
-        return (try SQLiteMetadata.recordedCodex(), false)
+        return try await CodexSource.snapshot()
     }
+
 }

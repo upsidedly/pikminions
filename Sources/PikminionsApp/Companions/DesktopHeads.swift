@@ -38,7 +38,9 @@ private final class HeadPanel: NSPanel {
                     self.model?.contextMenuHeads.isEmpty == true
                 else { return false }
                 return panel.frame.contains(NSEvent.mouseLocation) && self.flights[id] == nil
-            }, onPress: { [weak self] in self?.dismissHovered() })
+            },
+            onPress: { [weak self] in self?.dismissHovered() }
+        )
         eventMonitor = NSEvent.addLocalMonitorForEvents(matching: [
             .leftMouseDown, .leftMouseDragged, .leftMouseUp,
         ]) { [weak self] event in

@@ -101,7 +101,7 @@ import Foundation
             && (state.lines.last?.text.utf8.count ?? 24001) <= 24000,
         "Long talk output must keep streaming the newest bounded tail, rather than freezing at the prefix limit."
     )
-    let accepted = AgentSources.eventLine(
+    let accepted = T3ConversationParser.eventLine(
         .object([
             "type": .string("message.updated"),
             "payload": .object([

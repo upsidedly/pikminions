@@ -17,4 +17,5 @@ let package = Package(
         .executableTarget(
             name: "PikminionsApp",
             dependencies: [.product(name: "Antille", package: "antille"), "CSQLite"]),
+        .testTarget(name: "PikminionsTests", dependencies: ["PikminionsApp"]),
     ])

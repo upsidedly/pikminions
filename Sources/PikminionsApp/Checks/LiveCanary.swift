@@ -174,7 +174,7 @@ enum LiveCanary {
                     let stream = try await source.conversationStream(for: fork)
                     for try await item in stream {
                         if item["kind"]?.string == "snapshot" {
-                            return !AgentSources.projectionLines(item["projection"]).isEmpty
+                            return !T3ConversationParser.projectionLines(item["projection"]).isEmpty
                         }
                     }
                     return false

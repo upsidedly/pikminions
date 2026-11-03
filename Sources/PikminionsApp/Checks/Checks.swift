@@ -395,8 +395,8 @@ import SwiftUI
         ]),
     ])
     try expect(
-        AgentSources.projectionLines(forkProjection).first?.text == "Sample inherited output",
-        "fork output comes from visible inherited items")
+        T3ConversationParser.projectionLines(forkProjection).first?.text
+            == "Sample inherited output", "fork output comes from visible inherited items")
     let dedupedProjection: JSONValue = .object([
         "messages": .array([
             .object([
@@ -414,8 +414,8 @@ import SwiftUI
         ]),
     ])
     try expect(
-        AgentSources.projectionLines(dedupedProjection).first?.text == "Sample local output",
-        "deduplicated row text resolves to local message")
+        T3ConversationParser.projectionLines(dedupedProjection).first?.text
+            == "Sample local output", "deduplicated row text resolves to local message")
     let queued = AgentCommands.message(
         threadID: "fixture", text: "hello", commandID: "same", messageID: "message",
         activeRunID: "run", delivery: .nextTurn)
