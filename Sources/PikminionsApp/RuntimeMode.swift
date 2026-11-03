@@ -2,6 +2,7 @@
 // Copyright (c) 2026 Matthew Williams
 
 import Antille
+
 enum AppRuntime {
-    static var fixture:Bool {SilentCredentialPolicy.memoryOnly}
+    static var fixture: Bool { SilentCredentialPolicy.memoryOnly }
 }

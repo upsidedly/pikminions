@@ -6,12 +6,12 @@ import Foundation
 /// Identity-only memory: a dismissed speech bubble stays dismissed for all
 /// subsequent chunks/polls of the same message. No message text is retained.
 struct VocalDeliveryTracker {
-    private var seen:[String:[String]]=[:]
-    mutating func receive(agentID:String,eventID:String,historical:Bool)->Bool {
-        var values=seen[agentID] ?? []
-        guard !values.contains(eventID) else{return false}
+    private var seen: [String: [String]] = [:]
+    mutating func receive(agentID: String, eventID: String, historical: Bool) -> Bool {
+        var values = seen[agentID] ?? []
+        guard !values.contains(eventID) else { return false }
         values.append(eventID)
-        seen[agentID]=Array(values.suffix(64))
+        seen[agentID] = Array(values.suffix(64))
         return !historical
     }
 }
