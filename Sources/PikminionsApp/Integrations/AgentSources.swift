@@ -386,6 +386,12 @@ actor AgentSources {
         let snapshot = try await bounded(agent)
         return T3ConversationParser.projectionLines(snapshot["projection"])
     }
+    func waitForFixtureReply(for agent: AgentRecord) async throws {
+        guard let fixture else {
+            throw SourceFailure.message("Reply completion checks require the fixture source.")
+        }
+        await fixture.waitForReply(agent.threadID)
+    }
     func canaryDiagnostics(_ agent: AgentRecord) async throws -> JSONValue {
         guard ephemeralCredentials, agent.title.hasPrefix("Pikminions TEST - "), let token else {
             throw SourceFailure.message("Diagnostics require a labeled RAM-only canary.")

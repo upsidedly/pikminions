@@ -34,21 +34,15 @@ func runFixtureConversationChecks() async throws {
     try await source.send(
         agent, text: "Sample vocal reply", delivery: .nextTurn, commandID: UUID().uuidString,
         messageID: UUID().uuidString)
-    let deadline = Date.now.addingTimeInterval(4)
-    var received = false
-    while Date.now < deadline {
-        let lines = try await source.conversation(for: agent)
-        if lines.last?.role == "assistant", lines.last?.streaming == false,
-            lines.last?.text.contains("Sample vocal reply") == true
-        {
-            received = true
-            break
-        }
-        try await Task.sleep(for: .milliseconds(60))
-    }
+    try await source.waitForFixtureReply(for: agent)
+    let reply = try await source.conversation(for: agent).last
+    let received =
+        reply?.role == "assistant" && reply?.streaming == false
+        && reply?.text.contains("Sample vocal reply") == true
     try await source.disconnectT3()
     guard received else {
-        throw SourceFailure.message("The automatic-access fixture did not complete its reply.")
+        throw SourceFailure.message(
+            "The fixture producer completed without the expected final reply.")
     }
     print(
         "PASS: conversation access on startup/reconnect, immediate question answering and replies without an enable step, and revoked access on disconnect."

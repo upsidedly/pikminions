@@ -226,6 +226,11 @@ actor FixtureAgentSource {
             replies.removeValue(forKey: threadID)
         }
     }
+    /// Tests join the finite producer instead of depending on scheduler timing.
+    func waitForReply(_ threadID: String) async {
+        let reply = replies[threadID]
+        await reply?.value
+    }
     func shutdown() {
         for task in replies.values { task.cancel() }
         replies = [:]
