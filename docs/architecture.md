@@ -17,7 +17,7 @@ All paths below are under `Sources/PikminionsApp`.
 | `Support` | Bounded subprocesses, original chirps, app-icon rendering | `ProcessRunner.swift` |
 | `Checks` | CLI regressions and explicitly invoked live-canary tooling | `Checks.swift` |
 
-`Tests/PikminionsTests` contains pure Swift Testing cases. `Tests/NativeFixtures` builds separate sample apps against the real views and window controllers. Those tools exclude the launcher's object file when linking a fixture entry point, so keep the single `@main` launcher in `PikminionsApplication.swift`.
+`Tests/PikminionsTests` contains pure Swift Testing cases. `Tests/NativeFixtures` builds separate sample apps against the real views and window controllers. The tools use SwiftPM's current object-file list, excluding the launcher's object when linking a fixture entry point; stale build objects are ignored. Keep the single `@main` launcher in `PikminionsApplication.swift`.
 
 ## State and data flow
 

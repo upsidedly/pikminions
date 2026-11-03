@@ -31,6 +31,11 @@ jobs:
       - name: Fixture integration checks
         run: .build/debug/PikminionsApp --check --fixture
       - name: Native desktop fixtures
-        run: python3 scripts/build-head-size-fixture.py --check --spawn-check --sleep-check
+        run: |
+          stale_object=.build/debug/PikminionsApp.build/RemovedSource.swift.o
+          trap 'rm -f "$stale_object"' EXIT
+          printf 'stale object from a removed source\n' > "$stale_object"
+          python3 scripts/build-head-size-fixture.py --check --spawn-check --sleep-check
+          test -f "$stale_object"
       - name: Build conversation fixture
         run: python3 scripts/build-bubble-fixture.py

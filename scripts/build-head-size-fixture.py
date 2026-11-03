@@ -23,8 +23,10 @@ cache_flags=["-module-cache-path",str(module_cache)] if module_cache.is_dir() el
 for flag in cache_flags:build += ["-Xswiftc",flag]
 subprocess.run(build,cwd=root,check=True)
 binary_dir=Path(subprocess.check_output(["swift","build","--show-bin-path"],cwd=root,text=True).strip())
-objects=[*binary_dir.joinpath("Antille.build").glob("*.o"),
-         *(p for p in binary_dir.joinpath("PikminionsApp.build").glob("*.o") if p.name!="PikminionsApplication.swift.o")]
+# Use the current build graph: old object files can survive source moves.
+objects=[Path(line) for line in
+         (binary_dir/"PikminionsApp.product/Objects.LinkFileList").read_text().splitlines()
+         if line and Path(line).name!="PikminionsApplication.swift.o"]
 sleep=args.sleep or args.sleep_check
 bundle=root/("dist/PikminionsSleepFixture.app" if sleep else "dist/PikminionsSizeFixture.app")
 executable=bundle/"Contents/MacOS/HeadSizeFixture"
