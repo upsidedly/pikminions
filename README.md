@@ -94,8 +94,11 @@ The characters are derivative fan art based on Nintendo’s Pikmin. The app uses
 
 ## Development
 
+See [CONTRIBUTING.md](CONTRIBUTING.md) for setup, checks, native fixtures, and contribution guidelines. The [architecture guide](docs/architecture.md) maps the source folders and state ownership.
+
 ```sh
-swift build
+swift build --jobs 2
+swift test --jobs 2
 .build/debug/PikminionsApp --check --fixture
 ```
 
