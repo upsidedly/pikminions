@@ -9,7 +9,7 @@
   <img src="https://img.shields.io/badge/T3-local_connection-555555" alt="Local T3 connection">
 </p>
 
-Pikminions gives T3 Code conversations recognizable Pikmin heads. Grab one, let it dangle, toss it into a liquid black island, or pull its smaller head back onto your desktop. Click it to read recent output and respond.
+Pikminions gives T3 Code conversations recognizable Pikmin heads. Grab one, let it dangle, toss it into the island, or pull its smaller head back onto your desktop. Click it to read recent output and respond.
 
 <p align="center"><img src="docs/assets/pikmin-heads.png" alt="The nine authored flat Pikmin heads with species-specific tops" width="760"></p>
 
